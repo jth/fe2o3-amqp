@@ -42,9 +42,6 @@ pub use error::Error;
 mod builder;
 pub use builder::*;
 
-#[cfg(feature = "transaction")]
-mod transaction;
-
 use self::frame::{SessionFrame, SessionFrameBody};
 
 /// Default incoming_window and outgoing_window
@@ -232,7 +229,7 @@ pub struct Session {
 
     // Transaction
     #[cfg(feature = "transaction")]
-    pub(crate) txn_manager: TransactionManager
+    pub(crate) txn_manager: mpsc::Sender<LinkFrame>,
 }
 
 impl Session {

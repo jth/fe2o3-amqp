@@ -14,8 +14,9 @@ use crate::{
     endpoint::OutgoingChannel,
     session::{engine::SessionEngine, SessionState},
     util::Constant,
-    Session, transaction::TransactionManager,
+    Session, transaction::{TransactionManager, TransactionManagerBuilder},
 };
+use crate::link::LinkFrame;
 
 use super::{Error, SessionHandle, DEFAULT_WINDOW};
 
@@ -50,8 +51,8 @@ pub struct Builder {
     /// that are used by links attached to the session
     pub buffer_size: usize,
 
-    /// Transaction manager that manages incoming transactions
-    pub txn_manager: TransactionManager,
+    /// Transaction manager that manages incoming
+    pub txn_manager_builder: TransactionManagerBuilder,
 }
 
 impl Default for Builder {
@@ -65,7 +66,7 @@ impl Default for Builder {
             desired_capabilities: None,
             properties: None,
             buffer_size: DEFAULT_SESSION_MUX_BUFFER_SIZE,
-            txn_manager: TransactionManager::default()
+            txn_manager_builder: Default::default()
         }
     }
 }
@@ -76,36 +77,69 @@ impl Builder {
         Self::default()
     }
 
-    pub(crate) fn into_session(
-        self,
-        control: mpsc::Sender<SessionControl>,
-        outgoing_channel: OutgoingChannel,
-        local_state: SessionState,
-    ) -> Session {
-        Session {
-            control,
-            outgoing_channel,
-            local_state,
-            initial_outgoing_id: Constant::new(self.next_outgoing_id),
-            next_outgoing_id: self.next_outgoing_id,
-            incoming_window: self.incoming_window,
-            outgoing_window: self.outgoing_window,
-            handle_max: self.handle_max,
-            incoming_channel: None,
-            next_incoming_id: 0,
-            remote_incoming_window: 0,
-            remote_outgoing_window: 0,
-            offered_capabilities: self.offered_capabilities,
-            desired_capabilities: self.desired_capabilities,
-            properties: self.properties,
+    // #[cfg(not(feature = "transaction"))]
+    // pub(crate) fn into_session(
+    //     self,
+    //     control: mpsc::Sender<SessionControl>,
+    //     outgoing_channel: OutgoingChannel,
+    //     local_state: SessionState,
+    // ) -> Session {
+    //     Session {
+    //         control,
+    //         outgoing_channel,
+    //         local_state,
+    //         initial_outgoing_id: Constant::new(self.next_outgoing_id),
+    //         next_outgoing_id: self.next_outgoing_id,
+    //         incoming_window: self.incoming_window,
+    //         outgoing_window: self.outgoing_window,
+    //         handle_max: self.handle_max,
+    //         incoming_channel: None,
+    //         next_incoming_id: 0,
+    //         remote_incoming_window: 0,
+    //         remote_outgoing_window: 0,
+    //         offered_capabilities: self.offered_capabilities,
+    //         desired_capabilities: self.desired_capabilities,
+    //         properties: self.properties,
 
-            link_name_by_output_handle: Slab::new(),
-            link_by_name: BTreeMap::new(),
-            link_by_input_handle: BTreeMap::new(),
-            delivery_tag_by_id: BTreeMap::new(),
-            txn_manager: self.txn_manager
-        }
-    }
+    //         link_name_by_output_handle: Slab::new(),
+    //         link_by_name: BTreeMap::new(),
+    //         link_by_input_handle: BTreeMap::new(),
+    //         delivery_tag_by_id: BTreeMap::new(),
+    //     }
+    // }
+
+    // #[cfg(feature = "transaction")]
+    // pub(crate) fn into_session(
+    //     self,
+    //     control: mpsc::Sender<SessionControl>,
+    //     outgoing_channel: OutgoingChannel,
+    //     local_state: SessionState,
+    //     txn_manager: mpsc::Sender<LinkFrame>,
+    // ) -> Session {
+    //     Session {
+    //         control,
+    //         outgoing_channel,
+    //         local_state,
+    //         initial_outgoing_id: Constant::new(self.next_outgoing_id),
+    //         next_outgoing_id: self.next_outgoing_id,
+    //         incoming_window: self.incoming_window,
+    //         outgoing_window: self.outgoing_window,
+    //         handle_max: self.handle_max,
+    //         incoming_channel: None,
+    //         next_incoming_id: 0,
+    //         remote_incoming_window: 0,
+    //         remote_outgoing_window: 0,
+    //         offered_capabilities: self.offered_capabilities,
+    //         desired_capabilities: self.desired_capabilities,
+    //         properties: self.properties,
+
+    //         link_name_by_output_handle: Slab::new(),
+    //         link_by_name: BTreeMap::new(),
+    //         link_by_input_handle: BTreeMap::new(),
+    //         delivery_tag_by_id: BTreeMap::new(),
+    //         txn_manager,
+    //     }
+    // }
 
     /// The transfer-id of the first transfer id the sender will send
     pub fn next_outgoing_id(mut self, value: TransferNumber) -> Self {
@@ -175,8 +209,8 @@ impl Builder {
     }
 
     /// Set the transaction manager
-    pub fn transaction_manager(mut self, txn_manager: TransactionManager) -> Self {
-        self.txn_manager = txn_manager;
+    pub fn transaction_manager_builder(mut self, txn_manager_builder: TransactionManagerBuilder) -> Self {
+        self.txn_manager_builder = txn_manager_builder;
         self
     }
 
@@ -200,11 +234,36 @@ impl Builder {
             mpsc::channel::<SessionControl>(DEFAULT_SESSION_CONTROL_BUFFER_SIZE);
         let (incoming_tx, incoming_rx) = mpsc::channel(self.buffer_size);
         let (outgoing_tx, outgoing_rx) = mpsc::channel(self.buffer_size);
+        let (txn_manager_tx, txn_manager_rx) = mpsc::channel(self.buffer_size);
 
         // create session in connection::Engine
         let outgoing_channel = connection.allocate_session(incoming_tx).await?; // AllocSessionError
 
-        let session = self.into_session(session_control_tx.clone(), outgoing_channel, local_state);
+        let session = Session {
+            control: session_control_tx.clone(),
+            outgoing_channel,
+            local_state,
+            initial_outgoing_id: Constant::new(self.next_outgoing_id),
+            next_outgoing_id: self.next_outgoing_id,
+            incoming_window: self.incoming_window,
+            outgoing_window: self.outgoing_window,
+            handle_max: self.handle_max,
+            incoming_channel: None,
+            next_incoming_id: 0,
+            remote_incoming_window: 0,
+            remote_outgoing_window: 0,
+            offered_capabilities: self.offered_capabilities,
+            desired_capabilities: self.desired_capabilities,
+            properties: self.properties,
+
+            link_name_by_output_handle: Slab::new(),
+            link_by_name: BTreeMap::new(),
+            link_by_input_handle: BTreeMap::new(),
+            delivery_tag_by_id: BTreeMap::new(),
+            txn_manager: txn_manager_tx,
+        };
+
+        // let session = self.into_session(session_control_tx.clone(), outgoing_channel, local_state);
         let engine = SessionEngine::<crate::Session>::begin(
             connection.control.clone(),
             session,

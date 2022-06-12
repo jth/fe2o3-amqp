@@ -18,7 +18,7 @@ use tokio::sync::mpsc;
 use crate::{
     acceptor::LinkAcceptor,
     endpoint::{InputHandle, LinkFlow, self},
-    link::{self, receiver::ReceiverInner, role, state::LinkState, AttachError, ReceiverFlowState},
+    link::{self, receiver::ReceiverInner, role, state::LinkState, AttachError, ReceiverFlowState, LinkFrame},
     session::SessionHandle,
     Payload,
 };
@@ -41,24 +41,29 @@ pub(crate) enum TxnWorkFrame {
 
 pub(crate) type TxnWorkSender = mpsc::Sender<TxnWorkFrame>;
 
-/// Transaction manager
 #[derive(Debug, Clone)]
+pub struct TransactionManagerBuilder {
+    pub acceptor: LinkAcceptor,
+    pub max_retries: usize,
+}
+
+impl Default for TransactionManagerBuilder {
+    fn default() -> Self {
+        Self { acceptor: Default::default(), max_retries: Default::default() }
+    }
+}
+
+
+/// Transaction manager
+#[derive(Debug)]
 pub struct TransactionManager {
     pub(crate) acceptor: LinkAcceptor,
     pub(crate) txns: BTreeMap<TransactionId, ResourceTransaction>,
     pub(crate) txn_id_source: u64,
     pub(crate) max_retries: usize,
-}
 
-impl Default for TransactionManager {
-    fn default() -> Self {
-        Self {
-            acceptor: Default::default(),
-            txns: Default::default(),
-            txn_id_source: 0,
-            max_retries: DEFAULT_MAX_TXN_ID_RETRIES,
-        }
-    }
+    // channels
+    pub(crate) incoming: mpsc::Receiver<LinkFrame>,
 }
 
 // impl TransactionManager {
