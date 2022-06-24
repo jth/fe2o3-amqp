@@ -268,9 +268,9 @@ pub enum AttachError {
     #[error("Illegal session state")]
     IllegalSessionState,
 
-    /// Session's max number of handle has reached
-    #[error("Handle max reached")]
-    HandleMaxReached,
+    // /// Session's max number of handle has reached
+    // #[error("Handle max reached")]
+    // HandleMaxReached,
 
     /// Link name is duplicated
     #[error("Link name must be unique")]
@@ -296,7 +296,7 @@ impl From<AllocLinkError> for AttachError {
     fn from(error: AllocLinkError) -> Self {
         match error {
             AllocLinkError::IllegalState => Self::IllegalSessionState,
-            AllocLinkError::HandleMaxReached => Self::HandleMaxReached,
+            // AllocLinkError::HandleMaxReached => Self::HandleMaxReached,
             AllocLinkError::DuplicatedLinkName => Self::DuplicatedLinkName,
         }
     }

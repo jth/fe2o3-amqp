@@ -19,13 +19,13 @@ use crate::{
         role,
         state::{LinkFlowState, LinkFlowStateInner, LinkState},
         target_archetype::TargetArchetypeExt,
-        AttachError, LinkFrame, LinkIncomingItem, LinkRelay, ReceiverFlowState,
+        AttachError, LinkFrame, LinkIncomingItem, LinkRelay, ReceiverFlowState, ReceiverLink,
     },
     session::SessionHandle,
     Receiver,
 };
 
-use super::{link::SharedLinkAcceptorFields, SupportedReceiverSettleModes};
+use super::{link::SharedLinkAcceptorFields, SupportedReceiverSettleModes, error::LinkAcceptorError};
 
 /// An acceptor for a remote Sender link
 ///
@@ -67,7 +67,7 @@ impl LocalReceiverLinkAcceptor<Symbol> {
         shared: &SharedLinkAcceptorFields,
         remote_attach: Attach,
         session: &mut SessionHandle<R>,
-    ) -> Result<Receiver, (AttachError, Option<Attach>)> {
+    ) -> Result<Receiver, LinkAcceptorError> {
         self.accept_incoming_attach_inner(
             shared,
             remote_attach,
@@ -83,6 +83,9 @@ impl<C> LocalReceiverLinkAcceptor<C>
 where
     C: Clone,
 {
+    // if the application chooses not to create a terminus, the session endpoint will still create a link endpoint and issue
+    // an attach indicating that the link endpoint has no associated local terminus. In this case, the session endpoint MUST
+    // immediately detach the newly created link endpoint.
     pub async fn accept_incoming_attach_inner<T>(
         &self,
         shared: &SharedLinkAcceptorFields,
@@ -90,8 +93,9 @@ where
         control: &mpsc::Sender<SessionControl>,
         outgoing: &mpsc::Sender<LinkFrame>,
     ) -> Result<
-        ReceiverInner<link::Link<role::Receiver, T, ReceiverFlowState, DeliveryState>>,
-        (AttachError, Option<Attach>),
+        // ReceiverInner<link::Link<role::Receiver, T, ReceiverFlowState, DeliveryState>>,
+        ReceiverInner<ReceiverLink<T>>,
+        LinkAcceptorError<T>,
     >
     where
         T: Into<TargetArchetype>
@@ -148,43 +152,32 @@ where
             link_handle,
             input_handle,
         )
-        .await;
-        let output_handle = match output_handle {
-            Ok(handle) => handle,
-            Err(err) => return Err((err.into(), Some(remote_attach))), // If allocation fails, should respond with an empty attach
-        };
+        .await?; // NOTE: If session is unable to allocate link, the session should then be ended with error
 
-        let mut target = match &remote_attach.target {
-            Some(t) => match T::try_from(*t.clone()) {
-                Ok(t) => t,
-                Err(_) => {
-                    return Err((
-                        AttachError::Local(definitions::Error::new(
-                            AmqpError::NotImplemented,
-                            "Coordinator is not implemented".to_string(),
-                            None,
-                        )),
-                        Some(remote_attach),
-                    ))
-                }
-            },
-            None => return Err((AttachError::TargetIsNone, Some(remote_attach))),
-        };
+        let mut target = remote_attach
+            .target
+            .map(|t| {
+                T::try_from(*t).map_err(|_| {
+                    AttachError::not_implemented("Coordinator is not implemented".to_string())
+                })
+            })
+            .transpose()?;
+        let name = remote_attach.name;
 
         // Set local link to the capabilities that are actually supported
-        *target.capabilities_mut() = self.target_capabilities.clone().map(Into::into);
+        target.map(|mut t| *t.capabilities_mut() = self.target_capabilities.clone().map(Into::into));
 
         let mut link = link::Link::<role::Receiver, T, ReceiverFlowState, DeliveryState> {
             role: PhantomData,
             local_state: LinkState::Unattached, // State change will be taken care of in `on_incoming_attach`
             // state_code,
-            name: remote_attach.name.clone(),
+            name,
             output_handle: Some(output_handle),
             input_handle: None, // will be set in `on_incoming_attach`
             snd_settle_mode: Default::default(), // Will take value from incoming attach
             rcv_settle_mode,
             source: None, // Will take value from incoming attach
-            target: Some(target),
+            target: target,
             max_message_size: shared.max_message_size.unwrap_or_else(|| 0),
             offered_capabilities: shared.offered_capabilities.clone(),
             desired_capabilities: shared.desired_capabilities.clone(),

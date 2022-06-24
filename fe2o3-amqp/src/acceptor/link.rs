@@ -225,6 +225,10 @@ pub(crate) async fn handle_attach_error(
     session_control: &mpsc::Sender<SessionControl>,
 ) -> AttachError {
     // If a response of an empty attach is needed
+    //
+    // if the application chooses not to create a terminus, the session endpoint will still create a link endpoint and issue
+    // an attach indicating that the link endpoint has no associated local terminus. In this case, the session endpoint MUST 
+    // immediately detach the newly created link endpoint.
     if let Some(remote_attach) = remote_attach {
         if let Err(err) = reject_incoming_attach(remote_attach, outgoing).await {
             return err;
@@ -244,9 +248,11 @@ pub(crate) async fn handle_attach_error(
             }
             error
         }
-        AttachError::HandleMaxReached // TODO: any additional steps needed?
-        | AttachError::DuplicatedLinkName
-        | AttachError::SourceIsNone
+        AttachError::DuplicatedLinkName => {
+            // SessionError::HandleInUse?
+            todo!()
+        }
+        AttachError::SourceIsNone
         | AttachError::TargetIsNone
         | AttachError::Local(_) => error,
     }

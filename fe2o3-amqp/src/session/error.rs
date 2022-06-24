@@ -98,8 +98,8 @@ pub(crate) enum AllocLinkError {
     #[error("Illegal session state")]
     IllegalState,
 
-    #[error("Reached session handle max")]
-    HandleMaxReached,
+    // #[error("Reached session handle max")]
+    // HandleMaxReached,
 
     #[error("Link name must be unique")]
     DuplicatedLinkName,
@@ -125,11 +125,11 @@ impl From<AllocLinkError> for definitions::Error {
                 description: None,
                 info: None,
             },
-            AllocLinkError::HandleMaxReached => Self {
-                condition: ConnectionError::FramingError.into(),
-                description: Some("Handle max has been reached".to_string()),
-                info: None,
-            },
+            // AllocLinkError::HandleMaxReached => Self {
+            //     condition: ConnectionError::FramingError.into(),
+            //     description: Some("Handle max has been reached".to_string()),
+            //     info: None,
+            // },
             AllocLinkError::DuplicatedLinkName => Self {
                 condition: AmqpError::NotAllowed.into(),
                 description: Some("Link name is duplicated".to_string()),

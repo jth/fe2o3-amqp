@@ -128,6 +128,9 @@ where
 
         let source = match &remote_attach.source {
             Some(val) => *val.clone(),
+            // if the application chooses not to create a terminus, the session endpoint will still create a link endpoint and issue
+            // an attach indicating that the link endpoint has no associated local terminus. In this case, the session endpoint MUST 
+            // immediately detach the newly created link endpoint.
             None => return Err((AttachError::SourceIsNone, Some(remote_attach))),
         };
 
